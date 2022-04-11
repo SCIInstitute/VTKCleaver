@@ -18,6 +18,7 @@
 #include "vtkCellData.h"
 #include "vtkDoubleArray.h"
 #include "vtkFloatArray.h"
+#include "vtkImageCast.h"
 #include "vtkImageData.h"
 #include "vtkImageEuclideanDistance.h"
 #include "vtkImageGaussianSmooth.h"
@@ -47,11 +48,27 @@
 #include <cleaver/TetMesh.h>
 
 #include <cassert>
+#include <cmath>
 #include <list>
 #include <sstream>
 
 namespace
 {
+// NRRDTools is at https://github.com/SCIInstitute/Cleaver2/blob/master/src/lib/nrrd2cleaver/itk/NRRDTools.cpp
+// from NRRDTools::checkImageSize
+bool checkImageSize(vtkImageData* inputImg, double sigma)
+{
+  int dims[3];
+  inputImg->GetDimensions(dims);
+  auto* spacing = inputImg->GetSpacing();
+  std::vector<double> imageSize{ dims[0] * spacing[0], dims[1] * spacing[1], dims[2] * spacing[2] };
+  double imageSizeMin = *(std::min_element(std::begin(imageSize), std::end(imageSize)));
+
+  return (sigma / imageSizeMin) >= 0.1;
+}
+
+// Follow the pattern of NRRDTools::segmentationToIndicatorFunctions but
+// substitute VTK filters.
 std::vector<cleaver::AbstractScalarField*> segmentationToIndicatorFunctions(
   vtkImageData* image, double sigma)
 {
@@ -73,20 +90,24 @@ std::vector<cleaver::AbstractScalarField*> segmentationToIndicatorFunctions(
     threshold[idx]->ReplaceInOn();
     threshold[idx]->ReplaceOutOn();
     threshold[idx]->SetInputData(image);
+    // make sure blur input is floating point.
+    threshold[idx]->SetOutputScalarTypeToFloat();
     // bluring
     blur[idx]->SetInputConnection(threshold[idx]->GetOutputPort());
     blur[idx]->SetStandardDeviation(sigma);
     // second threshold
     thresholdDistance[idx]->ReplaceInOn();
     thresholdDistance[idx]->SetInValue(0.0);
+    thresholdDistance[idx]->SetOutputScalarTypeToFloat();
     thresholdDistance[idx]->SetInputConnection(blur[idx]->GetOutputPort());
-    // distance map
+    // distance map, output always doubles
     distance[idx]->SetInputConnection(thresholdDistance[idx]->GetOutputPort());
   }
   // Create an indicator function which is zero at the edges of a region,
   // has increasing positive values based on distance inside the region,
   // and negative values for distance outside.
-  // Mimic itkApproximateSignedDistanceMapImageFilter by combining two
+  // Mimic itkApproximateSignedDistanceMapImageFilter, which produces the
+  // inverse of an indicator function, by combining two
   // threshold + distance that are the inverse of each other
   threshold[0]->SetInValue(0.0);
   threshold[0]->SetOutValue(1.0);
@@ -133,7 +154,8 @@ std::vector<cleaver::AbstractScalarField*> segmentationToIndicatorFunctions(
     std::stringstream ss;
     ss << name << ii;
     fields[num]->setName(ss.str());
-    // fields[num]->setWarning(warning);
+    bool warning = checkImageSize(img, sigma);
+    fields[num]->setWarning(warning);
 
     // One field for each label in the input labelmap image.
     vtkImageIterator<double> it(img, img->GetExtent());
@@ -167,7 +189,90 @@ std::vector<cleaver::AbstractScalarField*> segmentationToIndicatorFunctions(
       }
       it.NextSpan();
     }
-    if ((min > 0 || max < 0) && (error.compare("none") == 0))
+    if ((min >= 0 || max <= 0) && (error.compare("none") == 0))
+    {
+      error = "maxmin";
+    }
+
+    std::cout << "Field " << fields[num]->name() << " " << error << std::endl;
+    fields[num]->setError(error);
+    ((cleaver::FloatField*)fields[num])
+      ->setScale(cleaver::vec3(spacing[0], spacing[1], spacing[2]));
+  }
+  return fields;
+}
+
+// Follow the pattern of NRRDTools::loadNRRDFiles
+std::vector<cleaver::AbstractScalarField*> loadIndicatorFunctions(
+  const std::vector<vtkImageData*> &images, double sigma)
+{
+  std::vector<cleaver::AbstractScalarField*> fields;
+  vtkNew<vtkImageCast> makeFloat;
+  makeFloat->SetOutputScalarTypeToFloat();
+  vtkNew<vtkImageGaussianSmooth> blur;
+  blur->SetStandardDeviation(sigma);
+  blur->SetDimensionality(3);
+  for(auto image: images)
+  {
+    makeFloat->SetInputData(image);
+    // blur, input should be floats.
+    blur->SetInputConnection(makeFloat->GetOutputPort());
+    blur->Update();
+    auto* img = blur->GetOutput();
+
+    int dims[3];
+    img->GetDimensions(dims);
+    size_t numPixel = dims[0] * dims[1] * dims[2];
+    float* data = new float[numPixel];
+    size_t num = fields.size();
+    fields.push_back(new cleaver::FloatField(data, dims[0], dims[1], dims[2]));
+    std::string name = image->GetObjectName();
+    if (name.empty())
+    {
+      std::stringstream ss;
+      ss << "IndicatorFunction" << num;
+      fields[num]->setName(ss.str());
+    }
+    else
+    {
+      fields[num]->setName(name);
+    }
+    bool warning = checkImageSize(img, sigma);
+    fields[num]->setWarning(warning);
+
+    // One field per input image.
+    vtkImageIterator<float> it(img, img->GetExtent());
+    size_t pixel = 0;
+    float min = static_cast<float>(*(it.BeginSpan()));
+    float max = min;
+    auto* spacing = img->GetSpacing();
+    std::string error = "none";
+    while (!it.IsAtEnd())
+    {
+      float* valIt = it.BeginSpan();
+      float* valEnd = it.EndSpan();
+      while (valIt != valEnd)
+      {
+        float val = static_cast<float>(*valIt++);
+        // ((cleaver::FloatField*)fields[num])->data()[pixel++] = val;
+        data[pixel++] = val;
+        // Error checking
+        if (std::isnan(val) && error.compare("none") == 0)
+        {
+          error = "nan";
+        }
+        else if (val < min)
+        {
+          min = val;
+        }
+        else if (val > max)
+        {
+          max = val;
+        }
+      }
+      it.NextSpan();
+    }
+    if ((min >= 0 || max <= 0) && (error.compare("none") == 0))
     {
       error = "maxmin";
     }
@@ -326,18 +431,17 @@ void fillUnstructuredGrid(vtkUnstructuredGrid* ugrid, TetMesh* tetMesh)
 vtkStandardNewMacro(vtkCleaverImageToUnstructuredGridFilter);
 
 //----------------------------------------------------------------------------
-vtkCleaverImageToUnstructuredGridFilter::vtkCleaverImageToUnstructuredGridFilter()
-{
-}
+vtkCleaverImageToUnstructuredGridFilter::vtkCleaverImageToUnstructuredGridFilter() = default;
 //----------------------------------------------------------------------------
-vtkCleaverImageToUnstructuredGridFilter::~vtkCleaverImageToUnstructuredGridFilter()
-{
-}
+vtkCleaverImageToUnstructuredGridFilter::~vtkCleaverImageToUnstructuredGridFilter() = default;
 
 //----------------------------------------------------------------------------
 int vtkCleaverImageToUnstructuredGridFilter::FillInputPortInformation(
   int vtkNotUsed(port), vtkInformation* info)
 {
+  // allow more than one input for indicator functions instead of a single
+  // label map.
+  info->Set(vtkAlgorithm::INPUT_IS_REPEATABLE(), 1);
   info->Set(vtkAlgorithm::INPUT_REQUIRED_DATA_TYPE(), "vtkImageData");
   return 1;
 }
@@ -346,10 +450,11 @@ int vtkCleaverImageToUnstructuredGridFilter::FillInputPortInformation(
 int vtkCleaverImageToUnstructuredGridFilter::RequestData(vtkInformation* vtkNotUsed(request),
   vtkInformationVector** inputVector, vtkInformationVector* outputVector)
 {
-  auto element_sizing_method = cleaver::Adaptive;
-  bool strip_exterior = true;
-  bool fix_tets = true;
-  bool verbose = true;
+  const auto element_sizing_method = cleaver::Adaptive;
+  const bool strip_exterior = true;
+  const bool fix_tets = true;
+  const bool verbose = true;
+  const bool segmentation = this->GetNumberOfInputConnections(0) == 1 && !this->GetInputIsIndicatorFunction();
   // get the output info object
   vtkInformation* outInfo = outputVector->GetInformationObject(0);
 
@@ -359,15 +464,32 @@ int vtkCleaverImageToUnstructuredGridFilter::RequestData(vtkInformation* vtkNotU
 
   vtkInformation* inInfo = inputVector[0]->GetInformationObject(0);
 
-  // get the input
+  // get the first input
   vtkImageData* inputImg = vtkImageData::SafeDownCast(inInfo->Get(vtkDataObject::DATA_OBJECT()));
 
-  cleaver::TetMesh* bgMesh = nullptr;
   // calculate indicator functions from label map.
-  std::vector<cleaver::AbstractScalarField*> fields =
-    segmentationToIndicatorFunctions(inputImg, this->Sigma);
-
+  std::vector<cleaver::AbstractScalarField*> fields;
+  if (segmentation)
+  {
+    fields = segmentationToIndicatorFunctions(inputImg, this->Sigma);
+  }
+  else
+  {
+    // inputs are indicator functions directly.
+    std::vector<vtkImageData *> images;
+    for (auto i = 0; i < this->GetNumberOfInputConnections(0); ++i)
+    {
+      inInfo = inputVector[0]->GetInformationObject(i);
+      inputImg = vtkImageData::SafeDownCast(inInfo->Get(vtkDataObject::DATA_OBJECT()));
+      if (inputImg)
+      {
+        images.push_back(inputImg);
+      }
+    }
+    fields = loadIndicatorFunctions(images, this->Sigma);
+  }
   bool simple = true;
+  cleaver::TetMesh* bgMesh = nullptr;
   cleaver::Volume* volume = new cleaver::Volume(fields);
   cleaver::CleaverMesher mesher(simple);
   mesher.setVolume(volume);
