@@ -35,47 +35,54 @@
 #include "vtkCleaverImageToUnstructuredGridFilter.h"
 
 const int TEST_IMAGE_SIZE = 24;
-// Test the use of a labelmap as input.
-int vtkCleaverImageToUnstructuredGridFilterTest(int argc, char* argv[])
+// Test the use of indicator functions as input. Indicator functions are
+// increasingly positive where the label/region is present, and more negative
+// further from the label/region.
+int TestCleaverFilterIndicatorInput(int argc, char* argv[])
 {
-  vtkNew<vtkImageData> labelImage;
-  labelImage->SetDimensions(TEST_IMAGE_SIZE, TEST_IMAGE_SIZE, TEST_IMAGE_SIZE);
-  labelImage->AllocateScalars(VTK_DOUBLE, 1);
+  vtkNew<vtkImageData> indicatorImage[3];
+  indicatorImage[0]->SetDimensions(TEST_IMAGE_SIZE, TEST_IMAGE_SIZE, TEST_IMAGE_SIZE);
+  indicatorImage[0]->AllocateScalars(VTK_DOUBLE, 1);
+  indicatorImage[1]->SetDimensions(TEST_IMAGE_SIZE, TEST_IMAGE_SIZE, TEST_IMAGE_SIZE);
+  indicatorImage[1]->AllocateScalars(VTK_DOUBLE, 1);
+  indicatorImage[2]->SetDimensions(TEST_IMAGE_SIZE, TEST_IMAGE_SIZE, TEST_IMAGE_SIZE);
+  indicatorImage[2]->AllocateScalars(VTK_DOUBLE, 1);
 
-  // label map with 2 spheres
-  double cX = 20.0;
-  double cY = 20.0;
-  double cZ = 20.0;
-  double rad = 5.0;
+  // indicator functions based on axes
   for (int i = 0; i < TEST_IMAGE_SIZE; ++i)
   {
     for (int j = 0; j < TEST_IMAGE_SIZE; ++j)
     {
       for (int k = 0; k < TEST_IMAGE_SIZE; ++k)
       {
-        double val =
-          (cX - i) * (cX - i) + (cY - j) * (cY - j) + (cZ - k) * (cZ - k) < rad * rad ? 1.0 : 0.0;
-        // second sphere at zero
-        if (i * i + j * j + k * k < TEST_IMAGE_SIZE * TEST_IMAGE_SIZE * 0.25)
-        {
-          val = 2.0;
-        }
-        labelImage->SetScalarComponentFromDouble(i, j, k, 0, val);
+        // cylinder, axis at zero
+        // double val = - (i * i + j * j) + TEST_IMAGE_SIZE ;
+        // linear ramp crossing zero on one axis.
+        double val = i - TEST_IMAGE_SIZE * 0.66;
+        // curve, no zeros
+        double val2 = (j - k * i + 0.3);
+        // constant background
+        indicatorImage[0]->SetScalarComponentFromDouble(i, j, k, 0, 0.0);
+        indicatorImage[1]->SetScalarComponentFromDouble(i, j, k, 0, val2);
+        indicatorImage[2]->SetScalarComponentFromDouble(i, j, k, 0, val);
       }
     }
   }
 
   vtkNew<vtkCleaverImageToUnstructuredGridFilter> cleaverFilter;
 
-  cleaverFilter->SetInputData(labelImage);
-  cleaverFilter->SetRateOfChange(0.19);
+  cleaverFilter->SetInputData(0, indicatorImage[0]);
+  cleaverFilter->AddInputData(0, indicatorImage[1]);
+  cleaverFilter->AddInputData(0, indicatorImage[2]);
   cleaverFilter->SetSamplingRate(1.0);
+  cleaverFilter->SetRateOfChange(0.1);
+  // cleaverFilter->SetFeatureScaling(0.5);
   cleaverFilter->Update();
 
   // Output checking
-  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfCells() != 1170,
+  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfCells() != 6358,
     "Unexpected number of cells " << cleaverFilter->GetOutput()->GetNumberOfCells());
-  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfPoints() != 281,
+  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfPoints() != 1268,
     "Unexpected number of points " << cleaverFilter->GetOutput()->GetNumberOfPoints());
 
   vtkNew<vtkDataSetMapper> allMapper;
