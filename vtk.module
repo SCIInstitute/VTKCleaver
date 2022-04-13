@@ -1,0 +1,32 @@
+NAME
+  VTK::Cleaver
+LIBRARY_NAME
+  vtkCleaver
+GROUPS
+  StandAlone
+DEPENDS
+  VTK::IOExport
+PRIVATE_DEPENDS
+  VTK::CommonCore
+  VTK::CommonDataModel
+  VTK::CommonTransforms
+  VTK::FiltersCore
+  VTK::FiltersGeneral
+  VTK::FiltersGeometry
+  VTK::ImagingCore
+  VTK::ImagingGeneral
+  VTK::ImagingMath
+  VTK::RenderingCore
+TEST_DEPENDS
+  VTK::CommonCore
+  VTK::CommonDataModel
+  VTK::CommonTransforms
+  VTK::FiltersCore
+  VTK::FiltersGeometry
+  VTK::FiltersSources
+  VTK::IOExport
+  VTK::IOImage
+  VTK::InteractionStyle
+  VTK::RenderingCore
+  VTK::RenderingOpenGL2
+  VTK::TestingRendering
