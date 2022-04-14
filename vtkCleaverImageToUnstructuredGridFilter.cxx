@@ -488,7 +488,7 @@ int vtkCleaverImageToUnstructuredGridFilter::RequestData(vtkInformation* vtkNotU
     }
     fields = loadIndicatorFunctions(images, this->Sigma);
   }
-  bool simple = true;
+  bool simple = false;
   cleaver::TetMesh* bgMesh = nullptr;
   cleaver::Volume* volume = new cleaver::Volume(fields);
   cleaver::CleaverMesher mesher(simple);
