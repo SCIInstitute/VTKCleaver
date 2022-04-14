@@ -75,9 +75,9 @@ int TestCleaverFilterLabelMapInput(int argc, char* argv[])
   cleaverFilter->Update();
 
   // Output checking
-  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfCells() != 1170,
+  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfCells() != 822,
     "Unexpected number of cells " << cleaverFilter->GetOutput()->GetNumberOfCells());
-  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfPoints() != 281,
+  vtkLogIf(ERROR, cleaverFilter->GetOutput()->GetNumberOfPoints() != 202,
     "Unexpected number of points " << cleaverFilter->GetOutput()->GetNumberOfPoints());
 
   vtkNew<vtkDataSetMapper> allMapper;
