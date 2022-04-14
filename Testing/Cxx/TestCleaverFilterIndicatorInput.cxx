@@ -35,6 +35,7 @@
 #include "vtkCleaverImageToUnstructuredGridFilter.h"
 
 const int TEST_IMAGE_SIZE = 24;
+
 // Test the use of indicator functions as input. Indicator functions are
 // increasingly positive where the label/region is present, and more negative
 // further from the label/region.

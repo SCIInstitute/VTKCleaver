@@ -35,7 +35,9 @@
 #include "vtkCleaverImageToUnstructuredGridFilter.h"
 
 const int TEST_IMAGE_SIZE = 24;
-// Test the use of a labelmap as input.
+
+// Test the use of a labelmap as input. Input is computed, background is zero,
+// sphere with label 1.0 centered at (cX, cY, cZ) and sphere with label 1.0 at zero.
 int TestCleaverFilterLabelMapInput(int argc, char* argv[])
 {
   vtkNew<vtkImageData> labelImage;
