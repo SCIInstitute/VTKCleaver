@@ -490,19 +490,19 @@ int vtkCleaverImageToUnstructuredGridFilter::RequestData(vtkInformation* vtkNotU
   }
   bool simple = false;
   cleaver::TetMesh* bgMesh = nullptr;
-  cleaver::Volume* volume = new cleaver::Volume(fields);
+  cleaver::Volume volume(fields);
   cleaver::CleaverMesher mesher(simple);
-  mesher.setVolume(volume);
+  mesher.setVolume(&volume);
   mesher.setAlphaInit(this->Alpha);
 
   // Create the sizing field
   std::vector<cleaver::AbstractScalarField*> sizingField;
-  sizingField.push_back(cleaver::SizingFieldCreator::createSizingFieldFromVolume(volume,
+  sizingField.push_back(cleaver::SizingFieldCreator::createSizingFieldFromVolume(&volume,
     (float)(1.0 / this->RateOfChange), (float)this->SamplingRate, (float)this->FeatureScaling,
     (int)this->Padding, (element_sizing_method != cleaver::Constant), verbose));
 
   // Set Sizing Field on Volume
-  volume->setSizingField(sizingField[0]);
+  volume.setSizingField(sizingField[0]);
 
   // Construct Background Mesh
   mesher.setConstant(false);
@@ -522,7 +522,7 @@ int vtkCleaverImageToUnstructuredGridFilter::RequestData(vtkInformation* vtkNotU
   // Strip Exterior Tets
   if (strip_exterior)
   {
-    cleaver::stripExteriorTets(mesh, volume, verbose);
+    cleaver::stripExteriorTets(mesh, &volume, verbose);
   }
 
   // Compute Quality If Havn't Already
@@ -540,6 +540,13 @@ int vtkCleaverImageToUnstructuredGridFilter::RequestData(vtkInformation* vtkNotU
   // mesh->writeMesh(output_path + output_name, output_format, verbose);
   // mesh->writeInfo(output_path + output_name, verbose);
   fillUnstructuredGrid(output, mesh);
+
+  // clean up memory
+  for(auto* field: fields)
+  {
+    delete dynamic_cast<cleaver::FloatField *>(field)->data();
+    delete field;
+  }
 
   return 1;
 }
